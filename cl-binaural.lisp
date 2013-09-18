@@ -12,6 +12,7 @@
 (defparameter *speed-of-sound* 34320 "Speed of sound in centimeters-per-second")
 (defparameter *interaural-distance* 20 "Distance between ears, also in centimeters.")
 (defparameter *size-of-earcanal* 0.5 "Characteristic size of the receiver, in centimeters.")
+(defparameter *maximum-source-distance* 1000 "Maximum distance to the source, in centimeters.")
 
 (defun simplest-binaural (r phi)
   "Based on R and PHI of where the sound originated, calculates needed ratio of amplitudes
@@ -33,13 +34,14 @@ and time delay. PHI is the angle between *right* ear and sound direction."
    (right-stop :initform nil)
    (left-finished-p :initform nil)
    (right-finished-p :initform nil)
+   rate
    my-mixer))
 
 (defclass delay-buffer ()
-  (buf
+  ((buf :accessor db-buf)
    (index :initform 0 :accessor db-index)
-   delay
-   size))
+   (delay :accessor db-delay)
+   (size :accessor db-size)))
 
 (defmethod initialize-instance :after ((buffer delay-buffer)
 				       &key element-type delay (size (1+ delay)) (initial-element 0))
@@ -82,25 +84,27 @@ and time delay. PHI is the angle between *right* ear and sound direction."
 (defun init-simple-binaurer (streamer mixer)
   "Perform initialization of various constants and data buffers.
    We can only do this, once we know the rate of the mixer we are playing for."
-  (let ((rate (slot-value mixer 'mixalot::rate)))
     (with-slots (r phi left-mult right-mult
 		   left-delay-buffer right-delay-buffer
-		   my-mixer) streamer
+		   my-mixer rate) streamer
+      (setf rate (slot-value mixer 'mixalot::rate))
       (multiple-value-bind (left-mult-new right-mult-new left-delay-new right-delay-new)
 	  (simplest-binaural r phi)
 	(setf left-mult left-mult-new
 	      right-mult right-mult-new
 	      left-delay-buffer (make-instance 'stoppable-delay-buffer
 					       :delay (ceiling (* rate left-delay-new))
-					       :element-type 'mono-sample)
+					       :element-type 'mono-sample
+					       :size (ceiling (* rate (/ *maximum-source-distance* *speed-of-sound*))))
 	      right-delay-buffer (make-instance 'stoppable-delay-buffer
 						:delay (ceiling (* rate right-delay-new))
-						:element-type 'mono-sample))
+						:element-type 'mono-sample
+						:size (ceiling (* rate (/ *maximum-source-distance* *speed-of-sound*)))))
 	(setf my-mixer (make-instance 'dummy-mixer
 				      :rate (slot-value mixer 'mixalot::rate)
 				      :callback-on-streamer-remove (lambda ()
 								     (toggle-stop left-delay-buffer)
-								     (toggle-stop right-delay-buffer))))))))
+								     (toggle-stop right-delay-buffer)))))))
 
 
 (defmethod streamer-mix-into ((streamer naive-binaurer) mixer buffer offset length time)
@@ -124,6 +128,36 @@ and time delay. PHI is the angle between *right* ear and sound direction."
 
 (defmethod streamer-cleanup ((stream naive-binaurer) mixer)
   (streamer-cleanup (slot-value stream 'streamer) (slot-value stream 'my-mixer)))
+
+(defgeneric move-streamer (streamer dr dphi)
+  (:documentation "Move the streamer, while it is being played.")
+  (:method ((streamer naive-binaurer) dr dphi)
+    (with-slots (r phi left-mult right-mult
+		   left-delay-buffer right-delay-buffer
+		   my-mixer rate) streamer
+      (multiple-value-bind (left-mult-new right-mult-new left-delay-new right-delay-new)
+	  (simplest-binaural (+ r dr) (+ phi dphi))
+	(let ((left-delay-new (ceiling (* rate left-delay-new)))
+	      (right-delay-new (ceiling (* rate right-delay-new))))
+	  (if (or (>= left-delay-new (db-size left-delay-buffer))
+		  (>= right-delay-new (db-size right-delay-buffer)))
+	      (warn "Too distant source (requested buffer size > than initially allocated), not moving.")
+	      (progn (setf left-mult left-mult-new
+			   right-mult right-mult-new
+			   r (+ r dr)
+			   phi (+ phi dphi))
+		     (macrolet ((frob (new-delay buffer)
+				  `(with-slots (buf index size delay) ,buffer
+				     (when (> ,new-delay delay)
+				       (iter (for i from delay to ,new-delay)
+					     (setf (aref buf (mod (+ i index) size))
+						   (aref buf (mod (+ delay index) size)))))
+				     (setf delay ,new-delay))))
+		       (frob left-delay-new left-delay-buffer)
+		       (frob right-delay-new right-delay-buffer)
+		       (values r phi)))))))))
+
+    
 
 (defclass test-streamer ()
   ((n :initform 0)

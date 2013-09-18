@@ -34,9 +34,17 @@ taken into account.
 What is, however, taken into account, is time, that it takes for sound to reach each ear, and
 decrease of amplitude of sound with distance to the source.
 
+
+Binaural streamers can be moved around, while they are being played, for example
+
+        CL-BINAURAL> (defparameter *streamer* (make-instance 'naive-binaural ...)) ; name for future reference
+        CL-BINAURAL> (mixer-add-streamer *mixer* *streamer*) ; start playback
+        CL-BINAURAL> (move-streamer *streamer* 5 0.1) ; this will increase radius by 5 cm and phi by 0.1 radian.
+
+Hence, repeatedly calling MOVE-STREAMER with small increments really feels like source moving continuously!
+
 TODO:
   - of course, it would be nice to incorporate some HRTFs, to make this feasible for creation of
     'virtual audio reality'
   - algorithms are far from optimal, and the whole thing lags, if you simultaneously feed enough
     NAIVE-BINAURERs to the mixer, hence it would be good to speed up.
-  - move the source, while it is being played

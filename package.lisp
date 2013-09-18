@@ -2,5 +2,5 @@
 
 (defpackage #:cl-binaural
   (:use #:cl #:mixalot #:iterate)
-  (:export #:naive-binaurer #:randomly-placed-source))
+  (:export #:naive-binaurer #:randomly-placed-source #:move-streamer))
 
