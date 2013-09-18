@@ -6,6 +6,7 @@
   :author "Alexander Popolitov <popolit@gmail.com>"
   :license "GPL"
   :depends-on (#:mixalot #:iterate)
-  :components ((:file "package")
+  :components ((:file "mixalot-dummy-patch")
+	       (:file "package")
                (:file "cl-binaural")))
 
