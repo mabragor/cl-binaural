@@ -3,6 +3,16 @@ cl-binaural
 
 Generate binaural sound, located at some point in space, from mono or stereo sound.
 
+In this branch we try to incorporate HRTFs into the model, to be able to generate sounds with different
+elevation.
+Some reseach [citation needed] indicates, that HRTFs are very dependent on the shape of the pinnae,
+and brain audio system constantly performs 'calibration', based on information from vision system
+and/or proprioception system.
+
+Hence, it is not effective to try to propose some fixed model of HRTF to suit all people.
+Instead, we should develop kind of a mechanism, which helps to relatively easily calibrate
+system to suit one's own HRTF.
+
 To get the idea, put your headphones on (this will not work very well with speakers) and execute
 
         CL-USER> (ql:quickload 'cl-binaural)
@@ -44,7 +54,5 @@ Binaural streamers can be moved around, while they are being played, for example
 Hence, repeatedly calling MOVE-STREAMER with small increments really feels like source moving continuously!
 
 TODO:
-  - of course, it would be nice to incorporate some HRTFs, to make this feasible for creation of
-    'virtual audio reality'
   - algorithms are far from optimal, and the whole thing lags, if you simultaneously feed enough
     NAIVE-BINAURERs to the mixer, hence it would be good to speed up.
