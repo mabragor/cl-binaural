@@ -210,8 +210,75 @@
     (setf repeater (make-instance 'streamer-loop
                                   :streamer (make-instance 'adv-pinger-oneshot
                                                            :on-off-times on-off-times
-                                                           :frequence freq)
+                                                           :frequency freq)
                                   :repeat repeat))))
 
 (proxy-streamer-methods adv-pinger repeater)
 
+
+(defclass material-dot ()
+  ((freq :initform 500 :initarg :frequency :accessor pinger-frequency)
+   (r :initform 10 :initarg :radius)
+   (phi :initform (/ pi 2) :initarg :phi)
+   (theta :initform 0 :initarg :theta)
+   (left-mult :initform 1)
+   (right-mult :initform 1)
+   pinger
+   my-mixer))
+
+(defmethod initialize-instance :after ((streamer material-dot) &key &allow-other-keys)
+  (with-slots (freq r phi theta pinger) streamer
+    (setf pinger (make-instance 'naive-binaurer :radius r :phi phi :theta theta
+                                :streamer (make-instance 'adv-pinger :frequency freq)))))
+
+(defmethod streamer-mix-into ((streamer material-dot) mixer buffer offset length time)
+  (with-slots (pinger my-mixer left-mult right-mult) streamer
+    (if (not (slot-boundp streamer 'my-mixer))
+        (setf my-mixer (make-instance 'dummy-mixer :rate (slot-value mixer 'mixalot::rate))))
+    (let ((my-buffer (make-array length :element-type '(unsigned-byte 32) :initial-element 0)))
+      (macrolet ((generate-output (length)
+                   `(iter (for i from 0 below ,length)
+                          (stereo-incf (aref buffer (+ offset i))
+                                       (stereo->volumed-stereo left-mult right-mult (aref my-buffer i))))))
+        (handler-case (streamer-mix-into pinger my-mixer my-buffer 0 length time)
+          (playback-finished (pf)
+            (generate-output (pf-length pf))
+            (signal-playback-finish (pf-length pf)))
+          (:no-error (&rest args)
+            (declare (ignore args))
+            (generate-output length)))))))
+
+(defmethod streamer-cleanup ((streamer material-dot) mixer)
+  (streamer-cleanup (slot-value streamer 'pinger) mixer))
+
+(defmethod move-streamer ((streamer material-dot) dr dphi dtheta)
+  (move-streamer (slot-value streamer 'pinger) dr dphi dtheta))
+
+(defgeneric change-volume-left (streamer dvol)
+  (:method ((streamer material-dot) dvol)
+    (incf (slot-value streamer 'left-mult) dvol)))
+(defgeneric change-volume-right (streamer dvol)
+  (:method ((streamer material-dot) dvol)
+    (incf (slot-value streamer 'right-mult) dvol)))
+(defgeneric change-volume (streamer dvol)
+  (:method ((streamer material-dot) dvol)
+    (change-volume-left streamer dvol)
+    (change-volume-right streamer dvol)
+    (values (slot-value streamer 'left-mult) (slot-value streamer 'right-mult))))
+(defgeneric skew-volume (streamer dvol)
+  (:method ((streamer material-dot) dvol)
+    (change-volume-left streamer (- dvol))
+    (change-volume-right streamer dvol)
+    (values (slot-value streamer 'left-mult) (slot-value streamer 'right-mult))))
+
+
+
+;; OK, what now?
+;; 1. (done) I need to incorporate 3d coordinate system
+;;    commands to move a source in this system
+;; 2. (done) I need to be dynamically change HRTFs
+;;    overal volume
+;;    volumes of left and right ears separately
+;;    ... and calculate HRTF from it
+;; 3. emacs mode for convenient pinger source creation, movement and volume adjustment
+;; 4. persistence engine

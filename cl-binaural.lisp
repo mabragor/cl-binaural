@@ -9,23 +9,45 @@
 (defun mono->volumed-mono (mult sample)
   (the mono-sample (floor (* mult sample))))
 
+(defun stereo->volumed-stereo (left right sample)
+  "Returns a new sample with volumes adjusted accordingly."
+  (the stereo-sample (stereo-sample (floor (* left (stereo-left sample)))
+                                    (floor (* right (stereo-right sample))))))
+
+
 (defparameter *speed-of-sound* 34320 "Speed of sound in centimeters-per-second")
 (defparameter *interaural-distance* 20 "Distance between ears, also in centimeters.")
 (defparameter *size-of-earcanal* 0.5 "Characteristic size of the receiver, in centimeters.")
 (defparameter *maximum-source-distance* 1000 "Maximum distance to the source, in centimeters.")
 
-(defun simplest-binaural (r phi)
-  "Based on R and PHI of where the sound originated, calculates needed ratio of amplitudes
-and time delay. PHI is the angle between *right* ear and sound direction."
-  (let* ((r-left (sqrt (+ (expt r 2) (/ (expt *interaural-distance* 2) 4) (* r *interaural-distance* (cos phi)))))
-	 (r-right (sqrt (+ (expt r 2) (/ (expt *interaural-distance* 2) 4) (- (* r *interaural-distance* (cos phi)))))))
+(defun p (x)
+  (warn "~a" x)
+  x)
+
+(defun pyramidal-angle-cosine (phi theta)
+  (handler-case (/ (- (+ 1
+                         (/ (expt (cos phi) 2) (expt (cos theta) 2)))
+                      (+ (expt (sin phi) 2)
+                         (* (expt (tan theta) 2) (expt (cos phi) 2))))
+                   (* 2 (cos phi) (/ (cos theta))))
+    (division-by-zero () 0)))
+
+(defun simplest-binaural (r phi theta)
+  "Based on R, PHI and THETA of where the sound originated, calculates needed ratio of amplitudes
+and time delay.
+  PHI == 0, THETA == 0 - direction to the right ear
+  PHI == 0, THETA == pi/2 - direction up"
+  (let* ((cos-psi (pyramidal-angle-cosine phi theta))
+         (r-left (sqrt (+ (expt r 2) (/ (expt *interaural-distance* 2) 4) (* r *interaural-distance* cos-psi))))
+	 (r-right (sqrt (+ (expt r 2) (/ (expt *interaural-distance* 2) 4) (- (* r *interaural-distance* cos-psi))))))
     (values (/ *size-of-earcanal* r-left) (/ *size-of-earcanal* r-right)
 	    (/ r-left *speed-of-sound*) (/ r-right *speed-of-sound*))))
 
 
 (defclass naive-binaurer ()
   ((r :initform 10 :initarg :radius)
-   (phi :initform (/ pi 2) :initarg :angle)
+   (phi :initform (/ pi 2) :initarg :phi)
+   (theta :initform 0 :initarg :theta)
    (streamer :initform (error "You should specify, what streamer should I binaurize") :initarg :streamer)
    left-mult right-mult
    left-delay-buffer
@@ -84,12 +106,13 @@ and time delay. PHI is the angle between *right* ear and sound direction."
 (defun init-simple-binaurer (streamer mixer)
   "Perform initialization of various constants and data buffers.
    We can only do this, once we know the rate of the mixer we are playing for."
-    (with-slots (r phi left-mult right-mult
+    (with-slots (r phi theta
+                   left-mult right-mult
 		   left-delay-buffer right-delay-buffer
 		   my-mixer rate) streamer
       (setf rate (slot-value mixer 'mixalot::rate))
       (multiple-value-bind (left-mult-new right-mult-new left-delay-new right-delay-new)
-	  (simplest-binaural r phi)
+	  (simplest-binaural r phi theta)
 	(setf left-mult left-mult-new
 	      right-mult right-mult-new
 	      left-delay-buffer (make-instance 'stoppable-delay-buffer
@@ -129,33 +152,38 @@ and time delay. PHI is the angle between *right* ear and sound direction."
 (defmethod streamer-cleanup ((stream naive-binaurer) mixer)
   (streamer-cleanup (slot-value stream 'streamer) (slot-value stream 'my-mixer)))
 
-(defgeneric move-streamer (streamer dr dphi)
+(defgeneric move-streamer (streamer dr dphi dtheta)
   (:documentation "Move the streamer, while it is being played.")
-  (:method ((streamer naive-binaurer) dr dphi)
-    (with-slots (r phi left-mult right-mult
+  (:method ((streamer naive-binaurer) dr dphi dtheta)
+    (with-slots (r phi theta
+                   left-mult right-mult
 		   left-delay-buffer right-delay-buffer
 		   my-mixer rate) streamer
-      (multiple-value-bind (left-mult-new right-mult-new left-delay-new right-delay-new)
-	  (simplest-binaural (+ r dr) (+ phi dphi))
-	(let ((left-delay-new (ceiling (* rate left-delay-new)))
-	      (right-delay-new (ceiling (* rate right-delay-new))))
-	  (if (or (>= left-delay-new (db-size left-delay-buffer))
-		  (>= right-delay-new (db-size right-delay-buffer)))
-	      (warn "Too distant source (requested buffer size > than initially allocated), not moving.")
-	      (progn (setf left-mult left-mult-new
-			   right-mult right-mult-new
-			   r (+ r dr)
-			   phi (+ phi dphi))
-		     (macrolet ((frob (new-delay buffer)
-				  `(with-slots (buf index size delay) ,buffer
-				     (when (> ,new-delay delay)
-				       (iter (for i from delay to ,new-delay)
-					     (setf (aref buf (mod (+ i index) size))
-						   (aref buf (mod (+ delay index) size)))))
-				     (setf delay ,new-delay))))
-		       (frob left-delay-new left-delay-buffer)
-		       (frob right-delay-new right-delay-buffer)
-		       (values r phi)))))))))
+      (if (or (> (+ theta dtheta) (/ pi 2))
+              (< (+ theta dtheta) (- (/ pi 2))))
+          (warn "Resulting theta would not fit interval [-pi/2, pi/2], not moving.")
+          (multiple-value-bind (left-mult-new right-mult-new left-delay-new right-delay-new)
+              (simplest-binaural (+ r dr) (+ phi dphi) (+ theta dtheta))
+            (let ((left-delay-new (ceiling (* rate left-delay-new)))
+                  (right-delay-new (ceiling (* rate right-delay-new))))
+              (if (or (>= left-delay-new (db-size left-delay-buffer))
+                      (>= right-delay-new (db-size right-delay-buffer)))
+                  (warn "Too distant source (requested buffer size > than initially allocated), not moving.")
+                  (progn (setf left-mult left-mult-new
+                               right-mult right-mult-new
+                               r (+ r dr)
+                               phi (+ phi dphi)
+                               theta (+ theta dtheta))
+                         (macrolet ((frob (new-delay buffer)
+                                      `(with-slots (buf index size delay) ,buffer
+                                         (when (> ,new-delay delay)
+                                           (iter (for i from delay to ,new-delay)
+                                                 (setf (aref buf (mod (+ i index) size))
+                                                       (aref buf (mod (+ delay index) size)))))
+                                         (setf delay ,new-delay))))
+                           (frob left-delay-new left-delay-buffer)
+                           (frob right-delay-new right-delay-buffer)))))))
+      (values r phi theta))))
 
     
 
