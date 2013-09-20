@@ -1,6 +1,13 @@
 
 (in-package #:cl-binaural)
 
+(defmacro proxy-streamer-methods (streamer proxy-slot)
+  "Redirect all (important) STREAMER methods to streamer, located in its slot named PROXY-SLOT."
+  `(progn (defmethod streamer-mix-into ((streamer ,streamer) mixer buffer offset length time)
+            (streamer-mix-into (slot-value streamer ',proxy-slot) mixer buffer offset length time))
+          (defmethod streamer-cleanup ((streamer ,streamer) mixer)
+            (streamer-cleanup (slot-value streamer ',proxy-slot) mixer))))
+
 (defclass wave-packet ()
   ((freq :initform 500 :initarg :frequency :accessor wp-frequency)
    (duration :initform 1 :initarg :duration :accessor wp-duration)
@@ -173,9 +180,38 @@
                                                                                   :frequency freq)
                                                                    (make-instance 'silence :duration time-off)))))))
 
-(defmethod streamer-mix-into ((streamer pinger) mixer buffer offset length time)
-  (streamer-mix-into (slot-value streamer 'repeater) mixer buffer offset length time))
+(proxy-streamer-methods pinger repeater)
 
-(defmethod streamer-cleanup ((streamer streamer-loop) mixer)
-  (streamer-cleanup (slot-value streamer 'repeater) mixer))
+(defclass adv-pinger-oneshot ()
+  ((freq :initform 500 :initarg :frequency :accessor pinger-frequency)
+   (on-off-times :initform '(0.1 0.1 0.1 0.4) :initarg :on-off-times)
+   my-streamer))
+
+(defmethod initialize-instance :after ((streamer adv-pinger-oneshot) &key &allow-other-keys)
+  (with-slots (freq on-off-times my-streamer) streamer
+    (iter (for time in on-off-times)
+          (for i from 0)
+          (collect (if (equal 0 (mod i 2))
+                       (make-instance 'wave-packet :duration time :frequency freq)
+                       (make-instance 'silence :duration time))
+            into res)
+          (finally (setf my-streamer (make-instance 'streamer-cat :streamers res))))))
+
+(proxy-streamer-methods adv-pinger-oneshot my-streamer)
+
+(defclass adv-pinger ()
+  ((freq :initform 500 :initarg :frequency :accessor pinger-frequency)
+   (on-off-times :initform '(0.1 0.1 0.1 0.4) :initarg :on-off-times)
+   (repeat :initform :infinity :initarg :repeat)
+   repeater))
+
+(defmethod initialize-instance :after ((streamer adv-pinger) &key &allow-other-keys)
+  (with-slots (freq on-off-times repeat repeater) streamer
+    (setf repeater (make-instance 'streamer-loop
+                                  :streamer (make-instance 'adv-pinger-oneshot
+                                                           :on-off-times on-off-times
+                                                           :frequence freq)
+                                  :repeat repeat))))
+
+(proxy-streamer-methods adv-pinger repeater)
 

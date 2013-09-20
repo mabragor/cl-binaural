@@ -5,7 +5,7 @@
   :description "Utilities to generate binaural sound from mono"
   :author "Alexander Popolitov <popolit@gmail.com>"
   :license "GPL"
-  :depends-on (#:mixalot #:iterate)
+  :depends-on (#:mixalot #:iterate #:defmacro-enhance)
   :components ((:file "package")
                (:file "cl-binaural")
                (:file "hrtf-games")))
