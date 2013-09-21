@@ -58,13 +58,15 @@ Special commands:
   (message "All dots silenced"))
 
 (defun binaural-string-from-dot-info (info)
-  (destructuring-bind (vocalized-p id freq r phi theta left-mult right-mult) info
-      (format "%s id: %3d freq: %5d r: %7.3f phi: %5.3f theta: %5.3f vol-left: %6.2f vol-right: %6.2f"
-              vocalized-p id freq r phi theta left-mult right-mult)))
+  (apply #'format `("%s id: %3d freq: %5d r: %7.3f phi: %5.3f theta: %5.3f vol-left: %6.2f vol-right: %6.2f"
+                    ,@(mapcar (lambda (x)
+                                (cdr (assoc x info)))
+                              '(:vocal-p :id :freq :r :phi :theta :vol-left :vol-right)))))
   
 (defun binaural-make-new-dot ()
   (interactive)
-  (let ((info (cons " " (slime-eval `(cl-binaural::binaural-make-new-material-dot)))))
+  (let ((info (pairlis '(:vocal-p :id :freq :r :phi :theta :vol-left :vol-right)
+                       (cons " " (slime-eval `(cl-binaural::binaural-make-new-material-dot))))))
     (with-current-buffer binaural-buffer-name
       (let ((buffer-read-only nil))
         (let ((line-pos (- (point) (line-beginning-position))))
@@ -79,25 +81,24 @@ Special commands:
        (unwind-protect (progn ,@body)
          (setf (point) ,g!-point-pos)))))
 
+(defun replace-current-line-with-info (info)
+  (crude-save-pos
+   (let ((buffer-read-only nil))
+     (beginning-of-line)
+     (kill-line)
+     (insert (binaural-string-from-dot-info info)))))
+
 (defun binaural-silence-dot-at-point (info)
-  (slime-eval `(cl-binaural::binaural-silence-dot ,(string-to-number (car info))))
-  (setf (car info) " ")
+  (slime-eval `(cl-binaural::binaural-silence-dot ,(cdr (assoc :id info))))
+  (setf (cdr (assoc :vocal-p info)) " ")
   (with-current-buffer binaural-buffer-name
-    (crude-save-pos
-     (let ((buffer-read-only nil))
-       (beginning-of-line)
-       (kill-line)
-       (insert (binaural-string-from-dot-info info))))))
+    (replace-current-line-with-info info)))
 
 (defun binaural-vocalize-dot-at-point (info)
-  (slime-eval `(cl-binaural::binaural-vocalize-dot ,(string-to-number (car info))))
-  (setf (car info) "*")
+  (slime-eval `(cl-binaural::binaural-vocalize-dot ,(cdr (assoc :id info))))
+  (setf (cdr (assoc :vocal-p info)) "*")
   (with-current-buffer binaural-buffer-name
-    (crude-save-pos
-     (let ((buffer-read-only nil))
-       (beginning-of-line)
-       (kill-line)
-       (insert (binaural-string-from-dot-info info))))))
+    (replace-current-line-with-info info)))
 
 (defun parse-dot-info-at-point ()
   (interactive)
@@ -107,21 +108,23 @@ Special commands:
       (if (re-search-forward (concat "^\\(\\*\\| \\) "
                                      "id: +\\([[:digit:]]+\\) "
                                      "freq: +\\([[:digit:]]+\\) "
-                                     "r: +\\([[:digit:]]+\\.[[:digit:]]+\\) "
-                                     "phi: +\\([[:digit:]]+\\.[[:digit:]]+\\) "
-                                     "theta: +\\([[:digit:]]+\\.[[:digit:]]+\\) "
-                                     "vol-left: +\\([[:digit:]]+\\.[[:digit:]]+\\) "
-                                     "vol-right: +\\([[:digit:]]+\\.[[:digit:]]+\\)$")
+                                     "r: +\\(-?[[:digit:]]+\\.[[:digit:]]+\\) "
+                                     "phi: +\\(-?[[:digit:]]+\\.[[:digit:]]+\\) "
+                                     "theta: +\\(-?[[:digit:]]+\\.[[:digit:]]+\\) "
+                                     "vol-left: +\\(-?[[:digit:]]+\\.[[:digit:]]+\\) "
+                                     "vol-right: +\\(-?[[:digit:]]+\\.[[:digit:]]+\\)$")
                              (line-end-position) t)
-          (cons (match-string 1)
-                (mapcar (lambda (x) (string-to-number (match-string x)))
-                        '(2 3 4 5 6 7 8)))
+          (cons `(:vocal-p . ,(match-string 1))
+                (pairlis '(:id :freq :r :phi :theta :vol-left :vol-right)
+                         (mapcar (lambda (x) (string-to-number (match-string x)))
+                                 '(2 3 4 5 6 7 8))))
         (error "Current line does not look like a dot description.")))))
 
 (defun vocalized-p (info)
-  (cond ((equal (car info) " ") nil)
-        ((equal (car info) "*") t)
-        (t (error "Unknown vocalization symbol %s" (car info)))))
+  (let ((it (cdr (assoc :vocal-p info))))
+    (cond ((equal it " ") nil)
+          ((equal it "*") t)
+          (t (error "Unknown vocalization symbol %s" it)))))
 
 (defun binaural-toggle-vocalization-at-point ()
   (interactive)
@@ -130,13 +133,54 @@ Special commands:
       (binaural-silence-dot-at-point info)
     (binaural-vocalize-dot-at-point info))))
 
+;;;  Now I need to be able to move the source around from my binaural mode
 
+(defmacro define-dot-mover (name dr dphi dtheta)
+  `(defun ,name ()
+     (interactive)
+     (let ((info (parse-dot-info-at-point)))
+       (destructuring-bind (r phi theta)
+           (slime-eval `(cl-binaural::binaural-move-dot ,(cdr (assoc :id info)) ,',dr ,',dphi ,',dtheta))
+         (setf (cdr (assoc :r info)) r
+               (cdr (assoc :phi info)) phi
+               (cdr (assoc :theta info)) theta)
+         (replace-current-line-with-info info)))))
+
+(defmacro define-dot-movers (name value)
+  `(progn (define-dot-mover ,(intern (concat "binaural-" (symbol-name name) "-decf-theta")) 0 0 ,(- value))
+          (define-dot-mover ,(intern (concat "binaural-" (symbol-name name) "-incf-theta")) 0 0 ,value)
+          (define-dot-mover ,(intern (concat "binaural-" (symbol-name name) "-decf-phi")) 0 ,(- value) 0)
+          (define-dot-mover ,(intern (concat "binaural-" (symbol-name name) "-incf-phi")) 0 ,value 0)
+          (define-dot-mover ,(intern (concat "binaural-" (symbol-name name) "-decf-r")) ,(- value) 0 0)
+          (define-dot-mover ,(intern (concat "binaural-" (symbol-name name) "-incf-r")) ,value 0 0)))
+
+(define-dot-movers slightly 0.01)
+(define-dot-movers normally 0.1)
+(define-dot-movers fast 1)
+
+;;; creating/destruction/toggling of dots
 (define-key binaural-mode-map "\C-cr" 'binaural-reset-mixer)
 (define-key binaural-mode-map "\C-cD" 'binaural-remove-all-dots)
 (define-key binaural-mode-map "\C-cs" 'binaural-silence-all-dots)
 (define-key binaural-mode-map "\C-cn" 'binaural-make-new-dot)
 (define-key binaural-mode-map "\C-cp" 'parse-dot-info-at-point)
 (define-key binaural-mode-map "\C-c\C-c" 'binaural-toggle-vocalization-at-point)
+
+;;; moving of dots
+(define-key binaural-mode-map "n" 'binaural-slightly-decf-theta)
+(define-key binaural-mode-map "p" 'binaural-slightly-incf-theta)
+(define-key binaural-mode-map "f" 'binaural-slightly-decf-phi)
+(define-key binaural-mode-map "b" 'binaural-slightly-incf-phi)
+(define-key binaural-mode-map "d" 'binaural-slightly-decf-r)
+(define-key binaural-mode-map "u" 'binaural-slightly-incf-r)
+(define-key binaural-mode-map "N" 'binaural-normally-decf-theta)
+(define-key binaural-mode-map "P" 'binaural-normally-incf-theta)
+(define-key binaural-mode-map "F" 'binaural-normally-decf-phi)
+(define-key binaural-mode-map "B" 'binaural-normally-incf-phi)
+(define-key binaural-mode-map "D" 'binaural-normally-decf-r)
+(define-key binaural-mode-map "U" 'binaural-normally-incf-r)
+
+
 (global-set-key "\C-c\C-b" 'binaural)
 
 
@@ -149,4 +193,4 @@ Special commands:
 
 (provide 'binaural)
 
-;;;  Now I need to be able to move the source around from my binaural mode
+

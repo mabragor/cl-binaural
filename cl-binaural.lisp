@@ -159,31 +159,38 @@ and time delay.
                    left-mult right-mult
 		   left-delay-buffer right-delay-buffer
 		   my-mixer rate) streamer
-      (if (or (> (+ theta dtheta) (/ pi 2))
-              (< (+ theta dtheta) (- (/ pi 2))))
-          (warn "Resulting theta would not fit interval [-pi/2, pi/2], not moving.")
-          (multiple-value-bind (left-mult-new right-mult-new left-delay-new right-delay-new)
-              (simplest-binaural (+ r dr) (+ phi dphi) (+ theta dtheta))
-            (let ((left-delay-new (ceiling (* rate left-delay-new)))
-                  (right-delay-new (ceiling (* rate right-delay-new))))
-              (if (or (>= left-delay-new (db-size left-delay-buffer))
-                      (>= right-delay-new (db-size right-delay-buffer)))
-                  (warn "Too distant source (requested buffer size > than initially allocated), not moving.")
-                  (progn (setf left-mult left-mult-new
-                               right-mult right-mult-new
-                               r (+ r dr)
-                               phi (+ phi dphi)
-                               theta (+ theta dtheta))
-                         (macrolet ((frob (new-delay buffer)
-                                      `(with-slots (buf index size delay) ,buffer
-                                         (when (> ,new-delay delay)
-                                           (iter (for i from delay to ,new-delay)
-                                                 (setf (aref buf (mod (+ i index) size))
-                                                       (aref buf (mod (+ delay index) size)))))
-                                         (setf delay ,new-delay))))
-                           (frob left-delay-new left-delay-buffer)
-                           (frob right-delay-new right-delay-buffer)))))))
-      (values r phi theta))))
+      (let ((new-r (+ r dr))
+            (new-phi (mod (+ phi dphi) (* 2 pi)))
+            (new-theta (+ theta dtheta)))
+        (cond ((or (> new-theta (/ pi 2)) (< new-theta (- (/ pi 2))))
+               (warn "Resulting theta would not fit interval [-pi/2, pi/2], not moving."))
+              ((< new-r 0) (warn "Resulting r would not be positive, not moving."))
+              ((not (slot-boundp streamer 'left-delay-buffer)) ; not played even once - do not have to do much
+               (setf r new-r
+                     phi new-phi
+                     theta new-theta))
+              (t (multiple-value-bind (left-mult-new right-mult-new left-delay-new right-delay-new)
+                     (simplest-binaural new-r new-phi new-theta)
+                   (let ((left-delay-new (ceiling (* rate left-delay-new)))
+                         (right-delay-new (ceiling (* rate right-delay-new))))
+                     (if (or (>= left-delay-new (db-size left-delay-buffer))
+                             (>= right-delay-new (db-size right-delay-buffer)))
+                         (warn "Too distant source (requested buffer size > than initially allocated), not moving.")
+                         (progn (setf left-mult left-mult-new
+                                      right-mult right-mult-new
+                                      r new-r
+                                      phi new-phi
+                                      theta new-theta)
+                                (macrolet ((frob (new-delay buffer)
+                                             `(with-slots (buf index size delay) ,buffer
+                                                (when (> ,new-delay delay)
+                                                  (iter (for i from delay to ,new-delay)
+                                                        (setf (aref buf (mod (+ i index) size))
+                                                              (aref buf (mod (+ delay index) size)))))
+                                                (setf delay ,new-delay))))
+                                  (frob left-delay-new left-delay-buffer)
+                                  (frob right-delay-new right-delay-buffer))))))))
+        (values r phi theta)))))
 
     
 

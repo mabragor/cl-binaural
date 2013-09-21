@@ -49,3 +49,8 @@
   (mixer-remove-streamer *binaural-mixer* (gethash id *streamers*))
   t)
 
+(defun binaural-move-dot (id dr dphi dtheta)
+  (mapcar (lambda (x)
+            (coerce x 'single-float))
+          (multiple-value-list (move-streamer (gethash id *streamers*) dr dphi dtheta))))
+  
