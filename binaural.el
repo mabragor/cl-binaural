@@ -158,6 +158,29 @@ Special commands:
 (define-dot-movers normally 0.1)
 (define-dot-movers fast 1)
 
+
+(defmacro define-dot-volchanger (name dleft dright)
+  `(defun ,name ()
+     (interactive)
+     (let ((info (parse-dot-info-at-point)))
+       (destructuring-bind (lvol rvol)
+           (slime-eval `(cl-binaural::binaural-change-dot-volume ,(cdr (assoc :id info)) ,',dleft ,',dright))
+         (setf (cdr (assoc :vol-left info)) lvol
+               (cdr (assoc :vol-right info)) rvol)
+         (replace-current-line-with-info info)))))
+
+(defmacro define-dot-volchangers (name value)
+  `(progn (define-dot-volchanger ,(intern (concat "binaural-" (symbol-name name) "-decf-rvol")) 0 ,(- value))
+          (define-dot-volchanger ,(intern (concat "binaural-" (symbol-name name) "-incf-rvol")) 0 ,value)
+          (define-dot-volchanger ,(intern (concat "binaural-" (symbol-name name) "-decf-vol")) ,(- value) ,(- value))
+          (define-dot-volchanger ,(intern (concat "binaural-" (symbol-name name) "-incf-vol")) ,value ,value)
+          (define-dot-volchanger ,(intern (concat "binaural-" (symbol-name name) "-decf-lvol")) ,(- value) 0)
+          (define-dot-volchanger ,(intern (concat "binaural-" (symbol-name name) "-incf-lvol")) ,value 0)))
+
+(define-dot-volchangers slightly 0.1)
+(define-dot-volchangers normally 1)
+
+
 ;;; creating/destruction/toggling of dots
 (define-key binaural-mode-map "\C-cr" 'binaural-reset-mixer)
 (define-key binaural-mode-map "\C-cD" 'binaural-remove-all-dots)
@@ -180,7 +203,23 @@ Special commands:
 (define-key binaural-mode-map "D" 'binaural-normally-decf-r)
 (define-key binaural-mode-map "U" 'binaural-normally-incf-r)
 
+;;; Changing dots volume
+(define-key binaural-mode-map "q" 'binaural-slightly-incf-lvol)
+(define-key binaural-mode-map "w" 'binaural-slightly-incf-vol)
+(define-key binaural-mode-map "e" 'binaural-slightly-incf-rvol)
+(define-key binaural-mode-map "a" 'binaural-slightly-decf-lvol)
+(define-key binaural-mode-map "s" 'binaural-slightly-decf-vol)
+(define-key binaural-mode-map "d" 'binaural-slightly-decf-rvol)
+(define-key binaural-mode-map "Q" 'binaural-normally-incf-lvol)
+(define-key binaural-mode-map "W" 'binaural-normally-incf-vol)
+(define-key binaural-mode-map "E" 'binaural-normally-incf-rvol)
+(define-key binaural-mode-map "A" 'binaural-normally-decf-lvol)
+(define-key binaural-mode-map "S" 'binaural-normally-decf-vol)
+(define-key binaural-mode-map "D" 'binaural-normally-decf-rvol)
 
+
+
+;;; The shortcut for the mode itself
 (global-set-key "\C-c\C-b" 'binaural)
 
 

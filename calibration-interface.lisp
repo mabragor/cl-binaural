@@ -54,3 +54,7 @@
             (coerce x 'single-float))
           (multiple-value-list (move-streamer (gethash id *streamers*) dr dphi dtheta))))
   
+(defun binaural-change-dot-volume (id dleft dright)
+  (let ((it (gethash id *streamers*)))
+    (list (change-volume-left it dleft)
+          (change-volume-right it dright))))
