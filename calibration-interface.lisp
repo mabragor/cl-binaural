@@ -37,7 +37,7 @@
   t)
 
 (defun binaural-reset-mixer ()
-  (handler-case (binaural-silence-all-dots)
+  (handler-case (mixer-remove-all-streamers *binaural-mixer*)
     (error () nil))
   (setf *binaural-mixer* (create-mixer))
   t)

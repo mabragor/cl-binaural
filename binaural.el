@@ -34,7 +34,9 @@
   "Major mode for calibration of HRTFs in CL-BINAURAL system.
 Special commands:
   \\{binaural-mode-map}"
-  (make-local-variable 'slime-buffer-connection))
+  (make-local-variable 'slime-buffer-connection)
+  (make-local-variable 'buffer-read-only)
+  (setf buffer-read-only t))
   
 (defun binaural-reset-mixer ()
   "Recreates a mixer in CL-BINAURAL."
@@ -46,7 +48,8 @@ Special commands:
   (interactive)
   (slime-eval `(cl-binaural::binaural-remove-all-dots))
   (with-current-buffer binaural-buffer-name
-    (delete-region (point-min) (point-max)))
+    (let ((buffer-read-only nil))
+      (delete-region (point-min) (point-max))))
   (message "All dots removed, starting clean"))
 
 (defun binaural-silence-all-dots ()
@@ -63,46 +66,57 @@ Special commands:
   (interactive)
   (let ((info (cons " " (slime-eval `(cl-binaural::binaural-make-new-material-dot)))))
     (with-current-buffer binaural-buffer-name
-      (forward-line)
-      (insert (binaural-string-from-dot-info info) ?\n)
-      (forward-line -1))))
+      (let ((buffer-read-only nil))
+        (let ((line-pos (- (point) (line-beginning-position))))
+          (forward-line)
+          (insert (binaural-string-from-dot-info info) ?\n)
+          (forward-line -1)
+          (incf (point) line-pos))))))
+
+(defmacro crude-save-pos (&rest body)
+  (let ((g!-point-pos (gensym "POINT-POS")))
+    `(let ((,g!-point-pos (point)))
+       (unwind-protect (progn ,@body)
+         (setf (point) ,g!-point-pos)))))
 
 (defun binaural-silence-dot-at-point (info)
   (slime-eval `(cl-binaural::binaural-silence-dot ,(string-to-number (car info))))
   (setf (car info) " ")
   (with-current-buffer binaural-buffer-name
-    (beginning-of-line)
-    (kill-line)
-    (insert (binaural-string-from-dot-info info) ?\n)))
+    (crude-save-pos
+     (let ((buffer-read-only nil))
+       (beginning-of-line)
+       (kill-line)
+       (insert (binaural-string-from-dot-info info))))))
 
 (defun binaural-vocalize-dot-at-point (info)
   (slime-eval `(cl-binaural::binaural-vocalize-dot ,(string-to-number (car info))))
   (setf (car info) "*")
   (with-current-buffer binaural-buffer-name
-    (beginning-of-line)
-    (kill-line)
-    (insert (binaural-string-from-dot-info info) ?\n)))
+    (crude-save-pos
+     (let ((buffer-read-only nil))
+       (beginning-of-line)
+       (kill-line)
+       (insert (binaural-string-from-dot-info info))))))
 
 (defun parse-dot-info-at-point ()
   (interactive)
-  (save-match-data
-    (beginning-of-line)
-    (if (re-search-forward (concat "^\\(\\*\\| \\) "
-                                   "id: +\\([[:digit:]]+\\) "
-                                   "freq: +\\([[:digit:]]+\\) "
-                                   "r: +\\([[:digit:]]+\\.[[:digit:]]+\\) "
-                                   "phi: +\\([[:digit:]]+\\.[[:digit:]]+\\) "
-                                   "theta: +\\([[:digit:]]+\\.[[:digit:]]+\\) "
-                                   "vol-left: +\\([[:digit:]]+\\.[[:digit:]]+\\) "
-                                   "vol-right: +\\([[:digit:]]+\\.[[:digit:]]+\\)$")
-                           (line-end-position) t)
-        (cons (match-string 1)
-              (mapcar (lambda (x) (string-to-number (match-string x)))
-                      '(2 3 4 5 6 7 8)))
-      (error "Current line does not look like a dot description."))))
-
-;; I need to be able to launch/silence material dots today
-;; tomorrow I will learn, how to alter them  
+  (save-excursion
+    (save-match-data
+      (beginning-of-line)
+      (if (re-search-forward (concat "^\\(\\*\\| \\) "
+                                     "id: +\\([[:digit:]]+\\) "
+                                     "freq: +\\([[:digit:]]+\\) "
+                                     "r: +\\([[:digit:]]+\\.[[:digit:]]+\\) "
+                                     "phi: +\\([[:digit:]]+\\.[[:digit:]]+\\) "
+                                     "theta: +\\([[:digit:]]+\\.[[:digit:]]+\\) "
+                                     "vol-left: +\\([[:digit:]]+\\.[[:digit:]]+\\) "
+                                     "vol-right: +\\([[:digit:]]+\\.[[:digit:]]+\\)$")
+                             (line-end-position) t)
+          (cons (match-string 1)
+                (mapcar (lambda (x) (string-to-number (match-string x)))
+                        '(2 3 4 5 6 7 8)))
+        (error "Current line does not look like a dot description.")))))
 
 (defun vocalized-p (info)
   (cond ((equal (car info) " ") nil)
@@ -134,3 +148,5 @@ Special commands:
 
 
 (provide 'binaural)
+
+;;;  Now I need to be able to move the source around from my binaural mode
