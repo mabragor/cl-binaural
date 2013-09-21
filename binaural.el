@@ -194,14 +194,14 @@ Special commands:
 (define-key binaural-mode-map "p" 'binaural-slightly-incf-theta)
 (define-key binaural-mode-map "f" 'binaural-slightly-decf-phi)
 (define-key binaural-mode-map "b" 'binaural-slightly-incf-phi)
-(define-key binaural-mode-map "d" 'binaural-slightly-decf-r)
-(define-key binaural-mode-map "u" 'binaural-slightly-incf-r)
+(define-key binaural-mode-map "i" 'binaural-slightly-decf-r)
+(define-key binaural-mode-map "o" 'binaural-slightly-incf-r)
 (define-key binaural-mode-map "N" 'binaural-normally-decf-theta)
 (define-key binaural-mode-map "P" 'binaural-normally-incf-theta)
 (define-key binaural-mode-map "F" 'binaural-normally-decf-phi)
 (define-key binaural-mode-map "B" 'binaural-normally-incf-phi)
-(define-key binaural-mode-map "D" 'binaural-normally-decf-r)
-(define-key binaural-mode-map "U" 'binaural-normally-incf-r)
+(define-key binaural-mode-map "I" 'binaural-normally-decf-r)
+(define-key binaural-mode-map "O" 'binaural-normally-incf-r)
 
 ;;; Changing dots volume
 (define-key binaural-mode-map "q" 'binaural-slightly-incf-lvol)
