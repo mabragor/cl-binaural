@@ -180,6 +180,21 @@ Special commands:
 (define-dot-volchangers slightly 0.1)
 (define-dot-volchangers normally 1)
 
+(defmacro define-dot-freqchanger (name d-freq)
+  `(defun ,name ()
+     (interactive)
+     (let ((info (parse-dot-info-at-point)))
+       (let ((freq (slime-eval `(cl-binaural::binaural-change-dot-freq ,(cdr (assoc :id info)) ,',d-freq))))
+         (setf (cdr (assoc :freq info)) freq)
+         (replace-current-line-with-info info)))))
+
+(defmacro define-dot-freqchangers (name value)
+  `(progn (define-dot-freqchanger ,(intern (concat "binaural-" (symbol-name name) "-decf-freq")) ,(- value))
+          (define-dot-freqchanger ,(intern (concat "binaural-" (symbol-name name) "-incf-freq")) ,value)))
+
+(define-dot-freqchangers slightly 1)
+(define-dot-freqchangers normally 10)
+
 
 ;;; creating/destruction/toggling of dots
 (define-key binaural-mode-map "\C-cr" 'binaural-reset-mixer)
@@ -217,6 +232,11 @@ Special commands:
 (define-key binaural-mode-map "S" 'binaural-normally-decf-vol)
 (define-key binaural-mode-map "D" 'binaural-normally-decf-rvol)
 
+;;; Changing dots frequency
+(define-key binaural-mode-map "," 'binaural-slightly-decf-freq)
+(define-key binaural-mode-map "." 'binaural-slightly-incf-freq)
+(define-key binaural-mode-map "<" 'binaural-normally-decf-freq)
+(define-key binaural-mode-map ">" 'binaural-normally-incf-freq)
 
 
 ;;; The shortcut for the mode itself

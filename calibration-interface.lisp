@@ -58,3 +58,8 @@
   (let ((it (gethash id *streamers*)))
     (list (change-volume-left it dleft)
           (change-volume-right it dright))))
+
+(defun binaural-change-dot-freq (id d-freq)
+  (let ((it (gethash id *streamers*)))
+    (change-freq it d-freq)))
+  

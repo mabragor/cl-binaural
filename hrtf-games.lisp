@@ -199,6 +199,49 @@
 
 (proxy-streamer-methods adv-pinger-oneshot my-streamer)
 
+;; It seems reasonable, that each 'ping' should still be performed with a fixed frequency
+;; Therefore, I shoudd write
+(defclass adv-pinger-recreative ()
+  ())
+;; which creates an instance of adv-pinger every time anew.
+
+;; and for that I need creative-repeater
+
+(defclass streamer-revive ()
+  ((callback :initform (error "You should provide a lambda which creates a streamer to loop over")
+             :initarg :revive-lambda)
+   my-streamer
+   (repeat :initform :infinity :initarg :repeat)
+   (nrepeats :initform 0))
+  (:documentation "streamer, which recreates streamer using provided lambda REPEAT times."))
+
+(defmethod streamer-mix-into ((streamer streamer-revive) mixer buffer offset length time)
+  (with-slots (my-streamer repeat nrepeats callback) streamer
+    (macrolet ((create-my-streamer ()
+                 `(let ((*streamer* streamer))
+                    (declare (special *streamer*))
+                    (setf my-streamer (funcall callback)))))
+      (when (not (slot-boundp streamer 'my-streamer))
+        (create-my-streamer))
+      (handler-case (streamer-mix-into my-streamer mixer buffer offset length time)
+        (playback-finished (pf)
+          (if (and (not (eq repeat :infinity))
+                   (equal (incf nrepeats) repeat)) ; this increment does not even get calculated in :INFINITY case!
+              (signal-playback-finish (pf-length pf))
+              (progn (streamer-cleanup my-streamer mixer)
+                     (create-my-streamer)
+                     (let ((written-length (pf-length pf)))
+                       (handler-case (streamer-mix-into streamer mixer buffer
+                                                        (+ offset written-length)
+                                                        (- length written-length)
+                                                        time)
+                         (playback-finished (pf)
+                           (signal-playback-finish (+ written-length (pf-length pf)))))))))))))
+                                                      
+(defmethod streamer-cleanup ((streamer streamer-revive) mixer)
+  (if (slot-boundp streamer 'my-streamer)
+      (streamer-cleanup (slot-value streamer 'my-streamer) mixer)))
+
 (defclass adv-pinger ()
   ((freq :initform 500 :initarg :frequency :accessor pinger-frequency)
    (on-off-times :initform '(0.1 0.1 0.1 0.4) :initarg :on-off-times)
@@ -215,6 +258,23 @@
 
 (proxy-streamer-methods adv-pinger repeater)
 
+(defclass adv-revive-pinger ()
+  ((freq :initform 500 :initarg :frequency :accessor pinger-frequency)
+   (on-off-times :initform '(0.1 0.1 0.1 0.4) :initarg :on-off-times)
+   (repeat :initform :infinity :initarg :repeat)
+   revive-repeater))
+
+(defmethod initialize-instance :after ((streamer adv-revive-pinger) &key &allow-other-keys)
+  (with-slots (freq on-off-times repeat revive-repeater) streamer
+    (setf revive-repeater (make-instance 'streamer-revive
+                                         :revive-lambda (lambda ()
+                                                          (make-instance 'adv-pinger-oneshot
+                                                                         :on-off-times on-off-times
+                                                                         :frequency freq))
+                                         :repeat repeat))))
+
+(proxy-streamer-methods adv-revive-pinger revive-repeater)
+
 
 (defclass material-dot ()
   ((freq :initform 500 :initarg :frequency :accessor pinger-frequency)
@@ -224,15 +284,17 @@
    (left-mult :initform 1)
    (right-mult :initform 1)
    pinger
+   binaurer
    my-mixer))
 
 (defmethod initialize-instance :after ((streamer material-dot) &key &allow-other-keys)
-  (with-slots (freq r phi theta pinger) streamer
-    (setf pinger (make-instance 'naive-binaurer :radius r :phi phi :theta theta
-                                :streamer (make-instance 'adv-pinger :frequency freq)))))
+  (with-slots (freq r phi theta pinger binaurer) streamer
+    (setf pinger (make-instance 'adv-revive-pinger :frequency freq)
+          binaurer (make-instance 'naive-binaurer :radius r :phi phi :theta theta
+                                  :streamer pinger))))
 
 (defmethod streamer-mix-into ((streamer material-dot) mixer buffer offset length time)
-  (with-slots (pinger my-mixer left-mult right-mult) streamer
+  (with-slots (binaurer my-mixer left-mult right-mult) streamer
     (if (not (slot-boundp streamer 'my-mixer))
         (setf my-mixer (make-instance 'dummy-mixer :rate (slot-value mixer 'mixalot::rate))))
     (let ((my-buffer (make-array length :element-type '(unsigned-byte 32) :initial-element 0)))
@@ -240,7 +302,7 @@
                    `(iter (for i from 0 below ,length)
                           (stereo-incf (aref buffer (+ offset i))
                                        (stereo->volumed-stereo left-mult right-mult (aref my-buffer i))))))
-        (handler-case (streamer-mix-into pinger my-mixer my-buffer 0 length time)
+        (handler-case (streamer-mix-into binaurer my-mixer my-buffer 0 length time)
           (playback-finished (pf)
             (generate-output (pf-length pf))
             (signal-playback-finish (pf-length pf)))
@@ -249,10 +311,11 @@
             (generate-output length)))))))
 
 (defmethod streamer-cleanup ((streamer material-dot) mixer)
-  (streamer-cleanup (slot-value streamer 'pinger) mixer))
+  ;; pinger gets cleaned up automatically through binaurer
+  (streamer-cleanup (slot-value streamer 'binaurer) mixer))
 
 (defmethod move-streamer ((streamer material-dot) dr dphi dtheta)
-  (move-streamer (slot-value streamer 'pinger) dr dphi dtheta))
+  (move-streamer (slot-value streamer 'binaurer) dr dphi dtheta))
 
 (defgeneric change-volume-left (streamer dvol)
   (:method ((streamer material-dot) dvol)
@@ -271,7 +334,13 @@
     (change-volume-right streamer dvol)
     (values (slot-value streamer 'left-mult) (slot-value streamer 'right-mult))))
 
-
+(defgeneric change-freq (streamer d-freq)
+  (:method ((streamer material-dot) d-freq)
+    (incf (pinger-frequency streamer) d-freq)
+    (change-freq (slot-value streamer 'pinger) d-freq))
+  (:method ((streamer adv-revive-pinger) d-freq)
+    (incf (pinger-frequency streamer) d-freq)))
+    
 
 ;; OK, what now?
 ;; 1. (done) I need to incorporate 3d coordinate system
