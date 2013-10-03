@@ -278,7 +278,7 @@
 
 (defclass material-dot ()
   ((freq :initform 500 :initarg :frequency :accessor pinger-frequency)
-   (r :initform 10 :initarg :radius)
+   (r :initform 15 :initarg :radius)
    (phi :initform (/ pi 2) :initarg :phi)
    (theta :initform 0 :initarg :theta)
    (left-mult :initform 1)
