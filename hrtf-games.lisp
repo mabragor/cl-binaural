@@ -29,6 +29,21 @@
            (when (> elapsed duration)
              (signal-playback-finish (- index offset)))))))
 
+;; (defmethod streamer-mix-into ((streamer wave-packet) mixer buffer offset length time)
+;;   (declare (ignore time))
+;;   (with-slots (freq phase duration elapsed) streamer
+;;     (with-slots ((rate mixalot::rate)) mixer
+;;       (loop for index upfrom offset
+;; 	 repeat length
+;; 	 with dp = (/ freq rate) ; (* 2.0 pi freq (/ rate))
+;; 	 as sample = (round (* 10000 (exp (- dp))))
+;; 	 do
+;; 	   (stereo-incf (aref buffer index) (mono->stereo sample))
+;; 	   (incf phase dp)
+;;            (incf elapsed (/ rate))
+;;            (when (> elapsed duration)
+;;              (signal-playback-finish (- index offset)))))))
+
 (defclass silence ()
   ((duration :initform 1 :initarg :duration :accessor s-duration)
    (elapsed :initform 0.0)))
@@ -287,9 +302,15 @@
    binaurer
    my-mixer))
 
-(defmethod initialize-instance :after ((streamer material-dot) &key &allow-other-keys)
+(defmethod initialize-instance :after ((streamer material-dot)
+				       &key (repeat :infinity)
+					 (on-off-times '(0.1 0.1 0.1 0.4))
+					 &allow-other-keys)
   (with-slots (freq r phi theta pinger binaurer) streamer
-    (setf pinger (make-instance 'adv-revive-pinger :frequency freq)
+    (setf pinger (make-instance 'adv-revive-pinger
+				:frequency freq
+				:on-off-times on-off-times
+				:repeat repeat)
           binaurer (make-instance 'naive-binaurer :radius r :phi phi :theta theta
                                   :streamer pinger))))
 
@@ -341,6 +362,68 @@
   (:method ((streamer adv-revive-pinger) d-freq)
     (incf (pinger-frequency streamer) d-freq)))
     
+(defun comb-input (form)
+  (and (consp form)
+       (iter (for elt in form)
+	     (if (symbolp elt)
+		 (collect (- (char-code (elt (string-downcase (string elt)) 0)) 96))))))
+
+(defun all-permutations (n)
+  (let (res)
+    (labels ((rec (acc depth)
+	       (if (equal 0 depth)
+		   (push acc res)
+		   (iter (for i from 1 to n)
+			 (if (not (find i acc :test #'equal))
+			     (rec (cons i acc) (1- depth)))))))
+      (rec nil n))
+    res))
+
+(let ((perm-cache (make-hash-table :test #'equal)))
+  (defun random-permutation (n)
+    (let ((perms (or (gethash n perm-cache)
+		     (setf (gethash n perm-cache)
+			   (all-permutations n)))))
+      (elt perms (random (length perms))))))
+  
+
+(defun letters-test (n &key (delta-phi 0.2))
+  (let ((order (iter (for i from 1 to n)
+		     (collect i))) ; (random-permutation n))
+	(letters (random-permutation n)))
+    (flet ((play ()
+	     (let ((rand-phi (+ (/ pi 2) (* (/ pi 2) (random 1.0)))))
+	       (iter (for num in order)
+		     (let ((freq (+ 400 (* 100 (elt letters (1- num)))))
+			   (phi (- rand-phi (* delta-phi num))))
+		       (mixer-add-streamer *binaural-mixer*
+					   (make-instance 'material-dot
+							  :on-off-times '(0.1 0.1)
+							  :phi phi
+							  :repeat 1))
+		       ;; (sleep 0.2)
+		       (mixer-add-streamer *binaural-mixer*
+					   (make-instance 'material-dot
+							  :on-off-times '(0.1 0.1)
+							  :frequency freq
+							  :phi phi
+							  :repeat 1))
+		       (sleep 0.2))))))
+      (labels ((replay ()
+		 (play)
+		 (format t "So, which is the sequence of letters?> ")
+		 (let ((command? (read)))
+		   (if (eq :repeat command?)
+		       (replay)
+		       command?))))
+	(let ((it (comb-input (cons (replay)
+				    (iter (for i from 1 to (1- n))
+					       (collect (read)))))))
+	  (format t "Letters were: ~{~a~^ ~}~%" (mapcar (lambda (x)
+							  (intern (string-upcase (code-char (+ 96 x)))))
+							letters))
+	  (equal it
+		 letters))))))
 
 ;; OK, what now?
 ;; 1. (done) I need to incorporate 3d coordinate system

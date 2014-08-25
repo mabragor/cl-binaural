@@ -209,7 +209,7 @@ and time delay.
 	 do
 	 (stereo-incf (aref buffer index) (mono->stereo sample))
 	 (incf phase dp))
-    (when (= (incf n) 6)
+    (when (= (incf n) 7)
       (mixalot:mixer-remove-streamer mixer streamer))))
 
 
@@ -219,7 +219,7 @@ and time delay.
 (defmacro randomly-placed-source (streamer &optional (each-form 1))
   `(iter (while 1)
 	 (mixer-add-streamer ,(intern "*MIXER*") (make-instance 'naive-binaurer
-								:angle (random (* 2 pi))
+								:phi (random (* 2 pi))
 								:radius (random 20)
 								:streamer ,streamer
 								))
