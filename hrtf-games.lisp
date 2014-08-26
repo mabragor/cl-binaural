@@ -425,6 +425,41 @@
 	  (equal it
 		 letters))))))
 
+(defun phi-line (from to velocity &key (dt 0.02))
+  (flet ((play (phi)
+	   (mixer-add-streamer *binaural-mixer*
+			       (make-instance 'material-dot
+					      :on-off-times (list dt dt)
+					      :phi phi
+					      :repeat 1))
+	   (sleep (* 2 dt))))
+    (iter (for phi from from to to by (* dt velocity))
+	  (format t "Phi is ~a~%" phi)
+	  (play phi))))
+
+
+(defun phi-lines (specs &key (dt 0.02))
+  (let ((phis (mapcar #'car specs)))
+    (flet ((play ()
+	     (let (res)
+	       (iter (for (nil to vel) in specs)
+		     (for curphi on phis)
+		     (when (or (and (> vel 0)
+				    (< (car curphi) to))
+			       (and (< vel 0)
+				    (> (car curphi) to)))
+		       (setf res t)
+		       (mixer-add-streamer *binaural-mixer*
+					   (make-instance 'material-dot
+							  :on-off-times (list dt dt)
+							  :phi (incf (car curphi) (* vel dt))
+							  :repeat 1))))
+	       (sleep (* 2 dt))
+	       res)))
+      (iter (while (play))
+	    (format t "Phis are ~a~%" phis)))))
+  
+
 ;; OK, what now?
 ;; 1. (done) I need to incorporate 3d coordinate system
 ;;    commands to move a source in this system
